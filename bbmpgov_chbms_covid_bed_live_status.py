@@ -4,6 +4,9 @@ import re
 import time
 import ast
 import argparse
+import datetime
+import logging
+
 import requests
 import urllib.request
 from bs4 import BeautifulSoup
@@ -13,6 +16,7 @@ from tabulate import tabulate
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--bed_types', type=str, help='bed types to search for availability', default='ICUVentl')
+parser.add_argument('--wait_time_sec', type=int, help='time to wait before the next query', default=60)
 
 args = parser.parse_args()
 
@@ -41,6 +45,8 @@ hospital_categories = [
 bed_col_title = 'Net Available Beds for C+ Patients'
 hospital_col_pairs = ('Dedicated Covid Healthcare Centers (DCHCs)', 'Name of facility')
 
+# logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status.log', format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S', level=logging.INFO)
+logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status.log', level=logging.INFO)
 
 def find_req_table(h4s, tables, hospital_categories, bed_types):
     
@@ -117,7 +123,7 @@ def url_connect(url):
     webUrl  = urllib.request.urlopen(url)
 
     #get the result code and print it
-    print ("result code: " + str(webUrl.getcode()))
+    # print ("result code: " + str(webUrl.getcode()))
     
     return webUrl
 
@@ -128,8 +134,10 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
     
     for ref_table_infos in ref_tables_infos:
         ref_table_title = ref_table_infos[0]
+
         for cur_table_infos in cur_tables_infos:
             cur_table_title = cur_table_infos[0]
+
             if ref_table_title == cur_table_title:
 
                 hosp_beds_info = []
@@ -151,14 +159,8 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
                         iname2 = valid_row_vals.index[vr_idx][1]
                         bed_dif = row[(iname1,iname2,'self')] - row[(iname1,iname2,'other')]
                         if bed_dif != 0:
-
                             hospital_name = ref_table_infos[1].iat[index,0]
-
                             hosp_beds_info.append([hospital_name, bed_dif])
-                            # if bed_dif > 0:
-                            #     print('%s hospital has %d beds freed up' % (hospital_name, bed_dif))
-                            # else:
-                            #     print('%s hospital has %d beds booked' % (hospital_name, -bed_dif))
 
                 if len(hosp_beds_info):
                     hosp_beds_infos.append(hosp_beds_info)
@@ -166,27 +168,45 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
 
     return avail_hosp_categories, hosp_beds_infos
 
-def display_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy):
+def display_availability_infos(cur_tables_infos, hosp_categories, bed_types, bed_availabiliy):
 
-    print('Current Availability')
+    if len(hosp_categories) == 0:
+        return
+
+    now = datetime.datetime.now()
+    print(now.strftime('%Y-%m-%d %H:%M:%S'))
+
+    table_header = ['Hospital Name'] + bed_types
+    # print('Current Availability')
+    logging.info('Current Availability')
     for cur_tables_info in cur_tables_infos:
-        print('')
-        print('Hospital Category:', cur_tables_info[0])
-        print(tabulate(cur_tables_info[1], headers='keys', numalign="center", stralign="center"))
-        print('')
+
+        # Convert dataframe to list
+        hosp_bed_infos = cur_tables_info[1].values
+        table_header[0] = cur_tables_info[0]
+        # print('')
+        logging.info('')
+        # print(tabulate(hosp_bed_infos, headers=table_header, numalign="center", stralign="center"))
+        logging.info(tabulate(hosp_bed_infos, headers=table_header, numalign="center", stralign="center"))
+        # print('')
+        logging.info('')
 
     # Print info about which in which hospital beds were freed up or occupied
-    print('Recent Changes in Hospital Beds')
+    # print('Recent Changes in Hospital Beds')
+    logging.info('Recent Changes in Hospital Beds')
     for hosp_category, bed_avail in zip(hosp_categories,bed_availabiliy):
 
-        print('')
-        print('Hospital Category:', hosp_category)
-        print(tabulate(bed_avail, headers=["Hospital", "Change"], numalign="center", stralign="center"))
-        print('')
+        # print('')
+        logging.info('')
+        # print(tabulate(bed_avail, headers=[hosp_category, "Change"], numalign="center", stralign="center"))
+        logging.info(tabulate(bed_avail, headers=[hosp_category, "Change"], numalign="center", stralign="center"))
+        # print('')
+        logging.info('')
 
 if __name__ == "__main__":
 
     bed_types = list(args.bed_types.split(','))
+    wait_time_sec = args.wait_time_sec
 
     webUrl = url_connect(url)
 
@@ -196,30 +216,29 @@ if __name__ == "__main__":
     soup = BeautifulSoup(html_text, 'html.parser')
 
     search_tags = [['div', 'col-md-12'], ['h4'], ['table']]
-    ref_table_infos = find_tables_infos(soup, search_tags, bed_types)
+    ref_tables_infos = find_tables_infos(soup, search_tags, bed_types)
 
     while 1:
         
-        time.sleep(1)
+        if wait_time_sec > 0:
+            time.sleep(wait_time_sec)
         
         webUrl = url_connect(url)
 
         # read the data from the URL and print it
         html_text = webUrl.read()
 
+        # Parse the html
         soup = BeautifulSoup(html_text, 'html.parser')
 
+        # Find current hospital bed availability
         cur_tables_infos = find_tables_infos(soup, search_tags, bed_types)
-        cur_tables_infos[0][1].iat[0,1] = 0
-        cur_tables_infos[0][1].iat[2,1] = 0
-        cur_tables_infos[0][1].iat[3,2] = 1
-
-        # Change a few values temporarily just for checking the algorithm
-        # cur_tables_infos[0][1][]
         
-        hosp_categories, bed_availabiliy = find_bed_availability_changes(ref_table_infos, cur_tables_infos, bed_types)
+        # Find any changes from the previous info
+        hosp_categories, bed_availabiliy = find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
 
-        display_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy)
+        # Log the results
+        display_availability_infos(cur_tables_infos, hosp_categories, bed_types, bed_availabiliy)
         
         ref_tables_infos.clear()
         ref_tables_infos = cur_tables_infos.copy()
