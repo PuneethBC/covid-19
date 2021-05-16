@@ -13,8 +13,21 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from tabulate import tabulate
 
+from twilio.rest import Client
 
 
+# Added to resolve SSL errors
+PATH_env_var = 'PATH'
+PATH_env_paths = os.environ.get(PATH_env_var)
+anaconda_base_path = 'C:/Users/punee/.conda/envs/kaggle'
+PATH_env_paths += ';' + anaconda_base_path
+PATH_env_paths += ';' + os.path.join(anaconda_base_path, 'scripts')
+PATH_env_paths += ';' + os.path.join(anaconda_base_path, 'Library', 'bin')
+PATH_env_paths += ';' + os.path.join(anaconda_base_path, 'DLL')
+os.environ[PATH_env_var] = PATH_env_paths
+
+
+# Command line arguments
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--bed_types', type=str, help='bed types to search for availability', default='ICUVentl')
@@ -23,9 +36,11 @@ parser.add_argument('--wait_time_sec', type=int, help='time to wait before the n
 args = parser.parse_args()
 
 
+# URL to fetch from
+url = 'https://bbmpgov.com/chbms/'
 
-url = 'http://bbmpgov.com/chbms/'
 
+# Hospital categories to look for
 hospital_categories = [
     # 'Government Quota Covid-19 Beds',
     # 'Private Arrangements By COVID-19 Patients',
@@ -36,6 +51,7 @@ hospital_categories = [
     # 'Government Covid Care Centers (CCC)'
     ]
 
+
 bed_col_title = 'Net Available Beds for C+ Patients'
 hospital_col_pairs = ('Dedicated Covid Healthcare Centers (DCHCs)', 'Name of facility')
 
@@ -43,6 +59,19 @@ hospital_col_pairs = ('Dedicated Covid Healthcare Centers (DCHCs)', 'Name of fac
 logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status.log', format='%(message)s', level=logging.INFO)
 
 
+# Your Account Sid and Auth Token from twilio account
+twilio_account_sid = ['AC73bcd83ad5e6b915d031b083a17bdc46']
+twilio_auth_token = ['d0493a5dfbab4e16181266a2b3a72f6a']
+twilio_src_num = ['+14708657790']
+twilio_dst_num = ['+919900142989']
+
+# instantiating the Client
+twilio_client = Client(twilio_account_sid, twilio_auth_token)
+
+
+def send_bed_availability_sms():
+    # sending message
+    message = client.messages.create(body='Hi there! How are you?', from_=twilio_src_num, to=twilio_dst_num)
 
 def find_req_table(h4s, tables, hospital_categories, bed_types):
     
@@ -136,9 +165,49 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
 
             if ref_table_title == cur_table_title:
 
+                # No need to proceed further if the two are equal
+                if ref_table_infos[1].equals(cur_table_infos[1]):
+                    continue
+
                 hosp_beds_info = []
 
-                bed_change_infos = ref_table_infos[1].compare(cur_table_infos[1])
+                # Check if theree are new or missing hospitals
+                ref_hospitals = ref_table_infos[1][hospital_col_pairs]
+                cur_hospitals = cur_table_infos[1][hospital_col_pairs]
+
+                new_hospitals = cur_table_infos[1][~cur_hospitals.isin(ref_hospitals)]
+                missing_hospitals = ref_table_infos[1][~ref_hospitals.isin(cur_hospitals)]
+
+                # Delete any new entries to enable comparision
+                if not new_hospitals.empty:
+                    idxs_to_drop = list(new_hospitals.index.values)
+
+                    # Add these as new available hospitals
+                    add_hospitals = cur_table_infos[1].iloc[idxs_to_drop].values.tolist()
+                    hosp_beds_info = hosp_beds_info + add_hospitals
+
+                    cmp_cur_table_infos = cur_table_infos[1].drop(cur_table_infos[1].index[idxs_to_drop])
+                    cmp_cur_table_infos.index = cmp_cur_table_infos.index - len(idxs_to_drop)
+                    cmp_cur_table_infos = cmp_cur_table_infos.sort_index()
+                else:
+                    cmp_cur_table_infos = cur_table_infos[1]
+
+                if not missing_hospitals.empty:
+                    idxs_to_drop = list(missing_hospitals.index.values)
+
+                    # Add these as booked hospitals
+                    sub_hospitals = ref_table_infos[1].iloc[idxs_to_drop].values
+                    sub_hospitals[:,1:] = -sub_hospitals[:,1:]
+                    hosp_beds_info = hosp_beds_info + sub_hospitals.tolist()
+
+                    cmp_ref_table_infos = ref_table_infos[1].drop(ref_table_infos[1].index[idxs_to_drop])
+                    cmp_ref_table_infos.index = cmp_ref_table_infos.index - len(idxs_to_drop)
+                    cmp_ref_table_infos = cmp_ref_table_infos.sort_index()
+                else:
+                    cmp_ref_table_infos = ref_table_infos[1]
+
+                # Proceed to compare
+                bed_change_infos = cmp_ref_table_infos.compare(cmp_cur_table_infos)
                 if bed_change_infos.empty:
                     continue
 
@@ -155,7 +224,7 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
                         iname2 = valid_row_vals.index[vr_idx][1]
                         bed_dif = row[(iname1,iname2,'self')] - row[(iname1,iname2,'other')]
                         if bed_dif != 0:
-                            hospital_name = ref_table_infos[1].iat[index,0]
+                            hospital_name = cmp_ref_table_infos.iat[index,0]
                             hosp_beds_info.append([hospital_name, bed_dif])
 
                 if len(hosp_beds_info):
@@ -177,7 +246,7 @@ def output_cur_availability(cur_tables_infos, bed_types):
         hosp_bed_infos = cur_tables_info[1].values
         table_header[0] = cur_tables_info[0]
         logging.info('')
-        logging.info(tabulate(hosp_bed_infos, headers=table_header, numalign="center", stralign="center"))
+        logging.info(tabulate(hosp_bed_infos, headers=table_header, tablefmt='pretty', numalign="center", stralign="center"))
     
     logging.info('')
 
@@ -189,7 +258,7 @@ def output_change_status(hosp_categories, bed_availabiliy):
 
     for hosp_category, bed_avail in zip(hosp_categories,bed_availabiliy):
         logging.info('')
-        logging.info(tabulate(bed_avail, headers=[hosp_category, "Change"], numalign="center", stralign="center"))
+        logging.info(tabulate(bed_avail, headers=[hosp_category, "Change"], tablefmt='pretty', numalign="center", stralign="center"))
     
     logging.info('')
 
@@ -210,7 +279,7 @@ def output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availab
 
 def output_ref_availability_infos(cur_tables_infos, bed_types):
 
-    logging.info('\n\n')
+    logging.info('')
     output_date_time()
     output_cur_availability(cur_tables_infos, bed_types)
     return
@@ -230,6 +299,14 @@ if __name__ == "__main__":
     search_tags = [['div', 'col-md-12'], ['h4'], ['table']]
     ref_tables_infos = find_tables_infos(soup, search_tags, bed_types)
 
+    # For debugging
+    # Change existing value
+    # ref_tables_infos[0][1].iloc[0,1] = 0
+    # Add new entry
+    # ref_tables_infos[0][1].loc[-1] = ['cat', 1, 2, 3, 4]  # adding a row
+    # ref_tables_infos[0][1].index = ref_tables_infos[0][1].index + 1  # shifting index
+    # ref_tables_infos[0][1] = ref_tables_infos[0][1].sort_index()  # sorting by index
+
     # Log the results
     output_ref_availability_infos(ref_tables_infos, bed_types)
 
@@ -248,7 +325,15 @@ if __name__ == "__main__":
 
         # Find current hospital bed availability
         cur_tables_infos = find_tables_infos(soup, search_tags, bed_types)
-        
+
+        # For debugging
+        # Change existing value
+        # cur_tables_infos[0][1].iloc[0,1] = 0
+        # Add new entry
+        # cur_tables_infos[0][1].loc[-1] = ['cat', 1, 2, 3, 4]  # adding a row
+        # cur_tables_infos[0][1].index = cur_tables_infos[0][1].index + 1  # shifting index
+        # cur_tables_infos[0][1] = cur_tables_infos[0][1].sort_index()  # sorting by index
+
         # Find any changes from the previous info
         hosp_categories, bed_availabiliy = find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
 
