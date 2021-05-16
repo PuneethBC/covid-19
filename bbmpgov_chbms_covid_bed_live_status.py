@@ -13,6 +13,8 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from tabulate import tabulate
 
+
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--bed_types', type=str, help='bed types to search for availability', default='ICUVentl')
@@ -20,17 +22,9 @@ parser.add_argument('--wait_time_sec', type=int, help='time to wait before the n
 
 args = parser.parse_args()
 
-# os.environ["https_proxy"] = "https://i0001029:AWSSMODT%40123@fr0-proxydwp-vip.eu.airbus.corp:3128"
-# os.environ["http_proxy"] = "http://i0001029:AWSSMODT%40123@fr0-proxydwp-vip.eu.airbus.corp:3128"
 
-# anaconda_bin = 'D:/Tools/anaconda3/Library/bin'
-# anaconda_dlls = 'D:/Tools/anaconda3/DLLs'
-
-# sys.path.append(anaconda_bin)
-# sys.path.append(anaconda_dlls)
 
 url = 'http://bbmpgov.com/chbms/'
-# url = 'https://google.com'
 
 hospital_categories = [
     # 'Government Quota Covid-19 Beds',
@@ -46,7 +40,9 @@ bed_col_title = 'Net Available Beds for C+ Patients'
 hospital_col_pairs = ('Dedicated Covid Healthcare Centers (DCHCs)', 'Name of facility')
 
 # logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status.log', format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S', level=logging.INFO)
-logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status.log', level=logging.INFO)
+logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status.log', format='%(message)s', level=logging.INFO)
+
+
 
 def find_req_table(h4s, tables, hospital_categories, bed_types):
     
@@ -168,40 +164,48 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
 
     return avail_hosp_categories, hosp_beds_infos
 
-def display_availability_infos(cur_tables_infos, hosp_categories, bed_types, bed_availabiliy):
+
+def output_cur_availability(cur_tables_infos, bed_types):
+
+    table_header = ['Hospital Name'] + bed_types
+    logging.info('Current Availability')
+    for cur_tables_info in cur_tables_infos:
+        # Convert dataframe to list
+        hosp_bed_infos = cur_tables_info[1].values
+        table_header[0] = cur_tables_info[0]
+        logging.info('')
+        logging.info(tabulate(hosp_bed_infos, headers=table_header, numalign="center", stralign="center"))
+        logging.info('')
+
+def output_change_status(hosp_categories, bed_availabiliy):
+
+    # Print info about which in which hospital beds were freed up or occupied
+    logging.info('Recent Changes in Hospital Beds')
+    for hosp_category, bed_avail in zip(hosp_categories,bed_availabiliy):
+        logging.info('')
+        logging.info(tabulate(bed_avail, headers=[hosp_category, "Change"], numalign="center", stralign="center"))
+        logging.info('')
+
+def output_date_time():
+    now = datetime.datetime.now()
+    logging.info(now.strftime('%Y-%m-%d %H:%M:%S'))
+
+def output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy, bed_types):
 
     if len(hosp_categories) == 0:
         return
 
-    now = datetime.datetime.now()
-    print(now.strftime('%Y-%m-%d %H:%M:%S'))
+    logging.info('\n\n')
+    output_date_time()
+    output_cur_availability(cur_tables_infos, bed_types)
+    output_change_status(hosp_categories, bed_availabiliy)
 
-    table_header = ['Hospital Name'] + bed_types
-    # print('Current Availability')
-    logging.info('Current Availability')
-    for cur_tables_info in cur_tables_infos:
+def output_ref_availability_infos(cur_tables_infos, bed_types):
 
-        # Convert dataframe to list
-        hosp_bed_infos = cur_tables_info[1].values
-        table_header[0] = cur_tables_info[0]
-        # print('')
-        logging.info('')
-        # print(tabulate(hosp_bed_infos, headers=table_header, numalign="center", stralign="center"))
-        logging.info(tabulate(hosp_bed_infos, headers=table_header, numalign="center", stralign="center"))
-        # print('')
-        logging.info('')
-
-    # Print info about which in which hospital beds were freed up or occupied
-    # print('Recent Changes in Hospital Beds')
-    logging.info('Recent Changes in Hospital Beds')
-    for hosp_category, bed_avail in zip(hosp_categories,bed_availabiliy):
-
-        # print('')
-        logging.info('')
-        # print(tabulate(bed_avail, headers=[hosp_category, "Change"], numalign="center", stralign="center"))
-        logging.info(tabulate(bed_avail, headers=[hosp_category, "Change"], numalign="center", stralign="center"))
-        # print('')
-        logging.info('')
+    logging.info('\n\n')
+    output_date_time()
+    output_cur_availability(cur_tables_infos, bed_types)
+    return
 
 if __name__ == "__main__":
 
@@ -217,6 +221,9 @@ if __name__ == "__main__":
 
     search_tags = [['div', 'col-md-12'], ['h4'], ['table']]
     ref_tables_infos = find_tables_infos(soup, search_tags, bed_types)
+
+    # Log the results
+    output_ref_availability_infos(ref_tables_infos, bed_types)
 
     while 1:
         
@@ -238,7 +245,7 @@ if __name__ == "__main__":
         hosp_categories, bed_availabiliy = find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
 
         # Log the results
-        display_availability_infos(cur_tables_infos, hosp_categories, bed_types, bed_availabiliy)
+        output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy, bed_types)
         
         ref_tables_infos.clear()
         ref_tables_infos = cur_tables_infos.copy()
