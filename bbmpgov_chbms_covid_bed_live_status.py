@@ -167,35 +167,43 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
 
 def output_cur_availability(cur_tables_infos, bed_types):
 
+    heading = 'Current Availability:'
+    logging.info('{:s}\n{:s}'.format(heading, len(heading) * '-'))
+
     table_header = ['Hospital Name'] + bed_types
-    logging.info('Current Availability')
+
     for cur_tables_info in cur_tables_infos:
         # Convert dataframe to list
         hosp_bed_infos = cur_tables_info[1].values
         table_header[0] = cur_tables_info[0]
         logging.info('')
         logging.info(tabulate(hosp_bed_infos, headers=table_header, numalign="center", stralign="center"))
-        logging.info('')
+    
+    logging.info('')
 
 def output_change_status(hosp_categories, bed_availabiliy):
 
     # Print info about which in which hospital beds were freed up or occupied
-    logging.info('Recent Changes in Hospital Beds')
+    heading = 'Recent Changes in Hospital Beds:'
+    logging.info('{:s}\n{:s}'.format(heading, len(heading) * '-'))
+
     for hosp_category, bed_avail in zip(hosp_categories,bed_availabiliy):
         logging.info('')
         logging.info(tabulate(bed_avail, headers=[hosp_category, "Change"], numalign="center", stralign="center"))
-        logging.info('')
+    
+    logging.info('')
 
 def output_date_time():
     now = datetime.datetime.now()
     logging.info(now.strftime('%Y-%m-%d %H:%M:%S'))
+    logging.info('')
 
 def output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy, bed_types):
 
     if len(hosp_categories) == 0:
         return
 
-    logging.info('\n\n')
+    logging.info('\n')
     output_date_time()
     output_cur_availability(cur_tables_infos, bed_types)
     output_change_status(hosp_categories, bed_availabiliy)
