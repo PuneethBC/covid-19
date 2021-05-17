@@ -7,7 +7,6 @@ import argparse
 import datetime
 import logging
 
-import requests
 import urllib.request
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -139,19 +138,12 @@ def find_tables_infos(soup, search_tags, bed_types):
     return table_infos
 
 def url_connect(url):
-    
-    # ctx = ssl.create_default_context()
-    # ctx.check_hostname = False
-    # ctx.verify_mode = ssl.CERT_NONE
-
-    # url_data = requests.get(url)
-    # htmltext = url.text
 
     # open a connection to a URL using urllib
     webUrl  = urllib.request.urlopen(url)
 
-    #get the result code and print it
-    # print ("result code: " + str(webUrl.getcode()))
+    # get the result code and print it
+    print ("result code: " + str(webUrl.getcode()))
     
     return webUrl
 
