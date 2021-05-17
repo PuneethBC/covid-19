@@ -19,7 +19,8 @@ from twilio.rest import Client
 PATH_env_var = 'PATH'
 PATH_env_paths = os.environ.get(PATH_env_var)
 
-anaconda_base_path = os.environ.get('CONDA_PREFIX')
+# anaconda_base_path = os.environ.get('CONDA_PREFIX')
+anaconda_base_path = 'C:/Users/punee/.conda/envs/kaggle'
 print('Anaconda base path set to:', anaconda_base_path)
 
 PATH_env_paths += ';' + anaconda_base_path
@@ -40,6 +41,7 @@ args = parser.parse_args()
 
 # URL to fetch from
 bbmp_bed_status_url = 'https://bbmpgov.com/chbms/'
+retry_wait_time_sec = 5
 
 
 # Hospital categories to look for
@@ -148,10 +150,16 @@ def find_tables_infos(soup, search_tags, bed_types):
         
     return table_infos
 
-def url_connect(url):
+def url_connect(url, retry_wait_time_sec=5):
 
-    # open a connection to a URL using urllib
-    webUrl  = urllib.request.urlopen(url)
+    while 1:
+
+        try:
+            # open a connection to a URL using urllib
+            webUrl  = urllib.request.urlopen(url)
+            break
+        except:
+            time.sleep(retry_wait_time_sec)
 
     # get the result code and print it
     # print ("result code: " + str(webUrl.getcode()))
@@ -196,7 +204,7 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
                     cmp_cur_table_infos.index = cmp_cur_table_infos.index - len(idxs_to_drop)
                     cmp_cur_table_infos = cmp_cur_table_infos.sort_index()
                 else:
-                    cmp_cur_table_infos = cur_table_infos[1]
+                    cmp_cur_table_infos = cur_table_infos[1].copy(deep=True)
 
                 if not missing_hospitals.empty:
                     idxs_to_drop = list(missing_hospitals.index.values)
@@ -210,7 +218,7 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
                     cmp_ref_table_infos.index = cmp_ref_table_infos.index - len(idxs_to_drop)
                     cmp_ref_table_infos = cmp_ref_table_infos.sort_index()
                 else:
-                    cmp_ref_table_infos = ref_table_infos[1]
+                    cmp_ref_table_infos = ref_table_infos[1].copy(deep=True)
 
                 # Proceed to compare
                 bed_change_infos = cmp_ref_table_infos.compare(cmp_cur_table_infos)
@@ -302,7 +310,7 @@ if __name__ == "__main__":
     bed_types = list(args.bed_types.split(','))
     wait_time_sec = args.wait_time_sec
 
-    webUrl = url_connect(bbmp_bed_status_url)
+    webUrl = url_connect(bbmp_bed_status_url, retry_wait_time_sec)
 
     # read the data from the URL and print it
     html_text = webUrl.read()
@@ -328,7 +336,7 @@ if __name__ == "__main__":
         if wait_time_sec > 0:
             time.sleep(wait_time_sec)
         
-        webUrl = url_connect(bbmp_bed_status_url)
+        webUrl = url_connect(bbmp_bed_status_url, retry_wait_time_sec)
 
         # read the data from the URL and print it
         html_text = webUrl.read()
