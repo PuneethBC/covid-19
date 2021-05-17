@@ -6,8 +6,8 @@ import ast
 import argparse
 import datetime
 import logging
-
 import urllib.request
+
 from bs4 import BeautifulSoup
 import pandas as pd
 from tabulate import tabulate
@@ -39,7 +39,7 @@ args = parser.parse_args()
 
 
 # URL to fetch from
-url = 'https://bbmpgov.com/chbms/'
+bbmp_bed_status_url = 'https://bbmpgov.com/chbms/'
 
 
 # Hospital categories to look for
@@ -66,14 +66,25 @@ twilio_account_sid = os.environ.get('TWILIO_AC_SID')
 twilio_auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
 twilio_src_num = os.environ.get('TWILIO_SRC_PNUM')
 twilio_dst_num = os.environ.get('TWILIO_DST_PNUM')
+twilio_sms_url = '<get url from here https://console.twilio.com/us1/develop/sms/try-it-out/send-an-sms?frameUrl=%2Fconsole%2Fsms%2Fgetting-started%2Fbuild%3Fx-target-region%3Dus1>'
 
-# instantiating the Client
-twilio_client = Client(twilio_account_sid, twilio_auth_token)
+# Configure twilio payload
+twilio_data = {
+  'To': twilio_dst_num,
+  'From': twilio_src_num,
+  'Body': 'Hi! Hope You are doing good!'
+}
 
 
-def send_bed_availability_sms():
+def send_bed_availability_sms(hosp_categories, bed_availabiliy):
+
+    if len(hosp_categories) == 0:
+        return
+
+    # Create the body of the message
+
     # sending message
-    message = client.messages.create(body='Hi there! How are you?', from_=twilio_src_num, to=twilio_dst_num)
+    response = requests.post(twilio_sms_url, data=twilio_data, auth=(twilio_account_sid, twilio_auth_token))
 
 def find_req_table(h4s, tables, hospital_categories, bed_types):
     
@@ -237,6 +248,10 @@ def output_cur_availability(cur_tables_infos, bed_types):
     table_header = ['Hospital Name'] + bed_types
 
     for cur_tables_info in cur_tables_infos:
+
+        if cur_tables_info.empty:
+            continue
+
         # Convert dataframe to list
         hosp_bed_infos = cur_tables_info[1].values
         table_header[0] = cur_tables_info[0]
@@ -246,6 +261,9 @@ def output_cur_availability(cur_tables_infos, bed_types):
     logging.info('')
 
 def output_change_status(hosp_categories, bed_availabiliy):
+
+    if len(hosp_categories) == 0:
+        return
 
     # Print info about which in which hospital beds were freed up or occupied
     heading = 'Recent Changes in Hospital Beds:'
@@ -284,7 +302,7 @@ if __name__ == "__main__":
     bed_types = list(args.bed_types.split(','))
     wait_time_sec = args.wait_time_sec
 
-    webUrl = url_connect(url)
+    webUrl = url_connect(bbmp_bed_status_url)
 
     # read the data from the URL and print it
     html_text = webUrl.read()
@@ -310,7 +328,7 @@ if __name__ == "__main__":
         if wait_time_sec > 0:
             time.sleep(wait_time_sec)
         
-        webUrl = url_connect(url)
+        webUrl = url_connect(bbmp_bed_status_url)
 
         # read the data from the URL and print it
         html_text = webUrl.read()
@@ -334,6 +352,8 @@ if __name__ == "__main__":
 
         # Log the results
         output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy, bed_types)
+
+        # send_bed_availability_sms(hosp_categories, bed_availabiliy)
         
         ref_tables_infos.clear()
         ref_tables_infos = cur_tables_infos.copy()
