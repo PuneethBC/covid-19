@@ -19,8 +19,7 @@ from twilio.rest import Client
 PATH_env_var = 'PATH'
 PATH_env_paths = os.environ.get(PATH_env_var)
 
-# anaconda_base_path = os.environ.get('CONDA_PREFIX')
-anaconda_base_path = 'C:/Users/punee/.conda/envs/kaggle'
+anaconda_base_path = os.environ.get('CONDA_PREFIX')
 print('Anaconda base path set to:', anaconda_base_path)
 
 PATH_env_paths += ';' + anaconda_base_path
