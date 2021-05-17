@@ -15,20 +15,6 @@ from tabulate import tabulate
 from twilio.rest import Client
 
 
-# Added to resolve SSL errors
-PATH_env_var = 'PATH'
-PATH_env_paths = os.environ.get(PATH_env_var)
-
-anaconda_base_path = os.environ.get('CONDA_PREFIX')
-print('Anaconda base path set to:', anaconda_base_path)
-
-PATH_env_paths += ';' + anaconda_base_path
-PATH_env_paths += ';' + os.path.join(anaconda_base_path, 'scripts')
-PATH_env_paths += ';' + os.path.join(anaconda_base_path, 'Library', 'bin')
-PATH_env_paths += ';' + os.path.join(anaconda_base_path, 'DLL')
-os.environ[PATH_env_var] = PATH_env_paths
-
-
 # Command line arguments
 parser = argparse.ArgumentParser()
 
@@ -58,7 +44,7 @@ bed_col_title = 'Net Available Beds for C+ Patients'
 hospital_col_pairs = ('Dedicated Covid Healthcare Centers (DCHCs)', 'Name of facility')
 
 # logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status.log', format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S', level=logging.INFO)
-logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status.log', format='%(message)s', level=logging.INFO)
+logging.basicConfig(filename='bbmpgov_chbms_covid_bed_status_pyvenv.log', format='%(message)s', level=logging.INFO)
 
 
 # Your Account Sid and Auth Token from twilio account
