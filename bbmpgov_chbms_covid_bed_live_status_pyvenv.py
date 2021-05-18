@@ -6,6 +6,8 @@ import ast
 import argparse
 import datetime
 import logging
+import random
+import requests
 import urllib.request
 
 from bs4 import BeautifulSoup
@@ -115,8 +117,11 @@ def find_req_table(h4s, tables, hospital_categories, bed_types):
     for bed_type in bed_types:
         req_cols.append((bed_col_title, bed_type))
     req_table_cols = req_table_rows[req_cols]
+
+    sorted_table = req_table_cols.sort_values(hospital_col_pairs)
+    sorted_table.reset_index(inplace=True, drop=True)
     
-    return [cur_title, req_table_cols]
+    return [cur_title, sorted_table]
 
 def find_tables_infos(soup, search_tags, bed_types):
     
@@ -144,6 +149,7 @@ def url_connect(url, retry_wait_time_sec=5):
             webUrl  = urllib.request.urlopen(url)
             break
         except:
+            print('Looks like there is connection issue. Retrying...')
             time.sleep(retry_wait_time_sec)
 
     # get the result code and print it
@@ -153,6 +159,8 @@ def url_connect(url, retry_wait_time_sec=5):
 
 def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types):
     
+    num_bed_types = len(bed_types)
+
     avail_hosp_categories = []
     hosp_beds_infos = []
     
@@ -182,12 +190,11 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
                     idxs_to_drop = list(new_hospitals.index.values)
 
                     # Add these as new available hospitals
-                    add_hospitals = cur_table_infos[1].iloc[idxs_to_drop].values.tolist()
+                    add_hospitals = cur_table_infos[1].loc[idxs_to_drop].values.tolist()
                     hosp_beds_info = hosp_beds_info + add_hospitals
 
-                    cmp_cur_table_infos = cur_table_infos[1].drop(cur_table_infos[1].index[idxs_to_drop])
-                    cmp_cur_table_infos.index = cmp_cur_table_infos.index - len(idxs_to_drop)
-                    cmp_cur_table_infos = cmp_cur_table_infos.sort_index()
+                    cmp_cur_table_infos = cur_table_infos[1].drop(idxs_to_drop)
+                    cmp_cur_table_infos.reset_index(inplace=True, drop=True)
                 else:
                     cmp_cur_table_infos = cur_table_infos[1].copy(deep=True)
 
@@ -195,36 +202,40 @@ def find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
                     idxs_to_drop = list(missing_hospitals.index.values)
 
                     # Add these as booked hospitals
-                    sub_hospitals = ref_table_infos[1].iloc[idxs_to_drop].values
+                    sub_hospitals = ref_table_infos[1].loc[idxs_to_drop].values
                     sub_hospitals[:,1:] = -sub_hospitals[:,1:]
                     hosp_beds_info = hosp_beds_info + sub_hospitals.tolist()
 
-                    cmp_ref_table_infos = ref_table_infos[1].drop(ref_table_infos[1].index[idxs_to_drop])
-                    cmp_ref_table_infos.index = cmp_ref_table_infos.index - len(idxs_to_drop)
-                    cmp_ref_table_infos = cmp_ref_table_infos.sort_index()
+                    cmp_ref_table_infos = ref_table_infos[1].drop(idxs_to_drop)
+                    cmp_ref_table_infos.reset_index(inplace=True, drop=True)
                 else:
                     cmp_ref_table_infos = ref_table_infos[1].copy(deep=True)
 
                 # Proceed to compare
                 bed_change_infos = cmp_ref_table_infos.compare(cmp_cur_table_infos)
-                if bed_change_infos.empty:
-                    continue
+                if not bed_change_infos.empty:
 
-                for index, row in bed_change_infos.iterrows():
+                    for index, row in bed_change_infos.iterrows():
 
-                    valid_row_vals = row.dropna()
-                    if valid_row_vals.empty:
-                        continue
+                        valid_row_vals = row.dropna()
+                        if valid_row_vals.empty:
+                            continue
 
-                    num_valid_rows = len(valid_row_vals)
-                    for vr_idx in range(0,num_valid_rows,2):
+                        hospital_name = cmp_ref_table_infos.iat[index,0]
+                        row_dif = [hospital_name] + [0] * num_bed_types
 
-                        iname1 = valid_row_vals.index[vr_idx][0]
-                        iname2 = valid_row_vals.index[vr_idx][1]
-                        bed_dif = row[(iname1,iname2,'self')] - row[(iname1,iname2,'other')]
-                        if bed_dif != 0:
-                            hospital_name = cmp_ref_table_infos.iat[index,0]
-                            hosp_beds_info.append([hospital_name, bed_dif])
+                        num_valid_rows = len(valid_row_vals)
+                        for vr_idx in range(0,num_valid_rows,2):
+
+                            iname1 = valid_row_vals.index[vr_idx][0]
+                            iname2 = valid_row_vals.index[vr_idx][1]
+                            bed_dif = row[(iname1,iname2,'self')] - row[(iname1,iname2,'other')]
+                            if bed_dif != 0:
+                                if iname2 in bed_types:
+                                    b_idx = bed_types.index(iname2)
+                                    row_dif[b_idx+1] = int(bed_dif)
+
+                        hosp_beds_info.append(row_dif)
 
                 if len(hosp_beds_info):
                     hosp_beds_infos.append(hosp_beds_info)
@@ -253,7 +264,7 @@ def output_cur_availability(cur_tables_infos, bed_types):
     
     logging.info('')
 
-def output_change_status(hosp_categories, bed_availabiliy):
+def output_change_status(hosp_categories, bed_availabiliy, bed_types):
 
     if len(hosp_categories) == 0:
         return
@@ -264,7 +275,7 @@ def output_change_status(hosp_categories, bed_availabiliy):
 
     for hosp_category, bed_avail in zip(hosp_categories,bed_availabiliy):
         logging.info('')
-        logging.info(tabulate(bed_avail, headers=[hosp_category, "Change"], tablefmt='pretty', numalign="center", stralign="center"))
+        logging.info(tabulate(bed_avail, headers=[hosp_category]+bed_types, tablefmt='pretty', numalign="center", stralign="center"))
     
     logging.info('')
 
@@ -281,7 +292,7 @@ def output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availab
     logging.info('\n')
     output_date_time()
     output_cur_availability(cur_tables_infos, bed_types)
-    output_change_status(hosp_categories, bed_availabiliy)
+    output_change_status(hosp_categories, bed_availabiliy, bed_types)
 
 def output_ref_availability_infos(cur_tables_infos, bed_types):
 
@@ -289,6 +300,80 @@ def output_ref_availability_infos(cur_tables_infos, bed_types):
     output_date_time()
     output_cur_availability(cur_tables_infos, bed_types)
     return
+
+def modify_table_random(tables_infos):
+
+    num_tables = len(tables_infos)
+    if num_tables == 0:
+        return
+
+    hosp_names = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+    # Change existing value
+    # Select the table to modify
+    table_to_modify = random.choice(range(num_tables))
+    table_infos = tables_infos[table_to_modify][1]
+
+    if not table_infos.empty:
+
+        # Select column to modify
+        num_cols = len(table_infos.columns)
+        col_to_modify = random.choice(range(num_cols))
+
+        # Select row to modify
+        num_rows = len(table_infos.index)
+        row_to_modify = random.choice(range(num_rows))
+        
+        # Modify specific row and column
+        if col_to_modify == 0:
+            hosp_name = random.choice(hosp_names)
+            table_infos.iloc[row_to_modify,col_to_modify] = hosp_name
+
+            # Sort by hospital names and reassign linear indexes
+            table_infos.sort_values(hospital_col_pairs, inplace=True)
+            table_infos.reset_index(inplace=True, drop=True)
+        else:
+            avail_beds = random.choice(range(20))
+            table_infos.iloc[row_to_modify,col_to_modify] = avail_beds
+
+
+    # Add/Del new entry
+    add_entry = (random.choice(range(100)) % 2) == 0
+    if add_entry:
+
+        # Select the table to modify
+        table_to_modify = random.choice(range(num_tables))
+        table_infos = tables_infos[table_to_modify][1]
+        
+        if not table_infos.empty:
+
+            num_cols = len(table_infos.columns)
+
+            # Add new entry
+            hosp_name = random.choice(hosp_names)
+            avail_beds = random.choice(range(20))
+            table_infos.iloc[-1] = [hosp_name] + [avail_beds] * (num_cols-1)
+
+            # Sort by hospital names and reassign linear indexes
+            table_infos.sort_values(hospital_col_pairs, inplace=True)
+            table_infos.reset_index(inplace=True, drop=True)
+    else:
+
+        # Select the table to modify
+        table_to_modify = random.choice(range(num_tables))
+        table_infos = tables_infos[table_to_modify][1]
+
+        if not table_infos.empty:
+
+            # Select row to delete
+            num_rows = len(table_infos.index)
+            row_to_modify = random.choice(range(num_rows))
+
+            # Delete specific row
+            table_infos.drop([row_to_modify])
+
+            # Reassign linear indexes
+            table_infos.reset_index(inplace=True, drop=True)
 
 if __name__ == "__main__":
 
@@ -306,12 +391,7 @@ if __name__ == "__main__":
     ref_tables_infos = find_tables_infos(soup, search_tags, bed_types)
 
     # For debugging
-    # Change existing value
-    # ref_tables_infos[0][1].iloc[0,1] = 0
-    # Add new entry
-    # ref_tables_infos[0][1].loc[-1] = ['cat', 1, 2, 3, 4]  # adding a row
-    # ref_tables_infos[0][1].index = ref_tables_infos[0][1].index + 1  # shifting index
-    # ref_tables_infos[0][1] = ref_tables_infos[0][1].sort_index()  # sorting by index
+    # modify_table_random(ref_tables_infos)
 
     # Log the results
     output_ref_availability_infos(ref_tables_infos, bed_types)
@@ -333,12 +413,7 @@ if __name__ == "__main__":
         cur_tables_infos = find_tables_infos(soup, search_tags, bed_types)
 
         # For debugging
-        # Change existing value
-        # cur_tables_infos[0][1].iloc[0,1] = 0
-        # Add new entry
-        # cur_tables_infos[0][1].loc[-1] = ['cat', 1, 2, 3, 4]  # adding a row
-        # cur_tables_infos[0][1].index = cur_tables_infos[0][1].index + 1  # shifting index
-        # cur_tables_infos[0][1] = cur_tables_infos[0][1].sort_index()  # sorting by index
+        # modify_table_random(cur_tables_infos)
 
         # Find any changes from the previous info
         hosp_categories, bed_availabiliy = find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
@@ -349,5 +424,5 @@ if __name__ == "__main__":
         # send_bed_availability_sms(hosp_categories, bed_availabiliy)
         
         ref_tables_infos.clear()
-        ref_tables_infos = cur_tables_infos.copy()
+        ref_tables_infos = cur_tables_infos
     
