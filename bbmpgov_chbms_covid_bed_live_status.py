@@ -21,8 +21,8 @@ from twilio.rest import Client
 PATH_env_var = 'PATH'
 PATH_env_paths = os.environ.get(PATH_env_var)
 
-# anaconda_base_path = os.environ.get('CONDA_PREFIX')
-anaconda_base_path = 'C:/Users/punee/.conda/envs/kaggle'
+anaconda_base_path = os.environ.get('CONDA_PREFIX')
+# anaconda_base_path = 'C:/Users/punee/.conda/envs/kaggle'
 print('Anaconda base path set to:', anaconda_base_path)
 
 PATH_env_paths += ';' + anaconda_base_path
@@ -44,6 +44,8 @@ args = parser.parse_args()
 # URL to fetch from
 bbmp_bed_status_url = 'https://bbmpgov.com/chbms/'
 retry_wait_time_sec = 5
+
+routine_output_time_th_sec = 60 * 60
 
 
 # Hospital categories to look for
@@ -299,7 +301,7 @@ def output_date_time():
     logging.info(now.strftime('%Y-%m-%d %H:%M:%S'))
     logging.info('')
 
-def output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy, bed_types):
+def output_cur_inc_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy, bed_types):
 
     if len(hosp_categories) == 0:
         return
@@ -309,12 +311,23 @@ def output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availab
     output_cur_availability(cur_tables_infos, bed_types)
     output_change_status(hosp_categories, bed_availabiliy, bed_types)
 
-def output_ref_availability_infos(cur_tables_infos, bed_types):
+def output_availability_infos(cur_tables_infos, bed_types):
 
     logging.info('')
     output_date_time()
     output_cur_availability(cur_tables_infos, bed_types)
     return
+
+def routinely_output_availability(cur_tables_infos, bed_types, ref_time_sec):
+
+    cur_time_sec = time.time()
+    time_lapsed_sec = cur_time_sec - ref_time_sec
+
+    if time_lapsed_sec >= routine_output_time_th_sec:
+        output_availability_infos()
+        return cur_time_sec
+
+    return ref_time_sec
 
 def modify_table_random(tables_infos):
 
@@ -408,8 +421,11 @@ if __name__ == "__main__":
     # For debugging
     # modify_table_random(ref_tables_infos)
 
+    # To routinely output the data
+    ref_time_sec = time.time()
+
     # Log the results
-    output_ref_availability_infos(ref_tables_infos, bed_types)
+    output_availability_infos(ref_tables_infos, bed_types)
 
     while 1:
         
@@ -430,11 +446,13 @@ if __name__ == "__main__":
         # For debugging
         # modify_table_random(cur_tables_infos)
 
+        ref_time_sec = routinely_output_availability(cur_tables_infos, bed_types, ref_time_sec)
+
         # Find any changes from the previous info
         hosp_categories, bed_availabiliy = find_bed_availability_changes(ref_tables_infos, cur_tables_infos, bed_types)
 
         # Log the results
-        output_cur_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy, bed_types)
+        output_cur_inc_availability_infos(cur_tables_infos, hosp_categories, bed_availabiliy, bed_types)
 
         # send_bed_availability_sms(hosp_categories, bed_availabiliy)
         
