@@ -1,0 +1,5 @@
+python bbmpgov_chbms_covid_bed_live_status.py --bed_types=HDU,ICU,ICUVentl --wait_time_sec=5
+
+python bbmpgov_chbms_covid_bed_live_status_pyvenv.py --bed_types=HDU,ICU,ICUVentl --wait_time_sec=5
+
+python bbmpgov_download_covid_bulletin.py --tags=View --from_date=all --save_dir=BBMP_Covid19_Daily_Statistics
