@@ -8,6 +8,8 @@ import argparse
 import random
 import glob
 
+from tqdm import tqdm
+
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
@@ -26,8 +28,8 @@ from requests.exceptions import RequestException
 PATH_env_var = 'PATH'
 PATH_env_paths = os.environ.get(PATH_env_var)
 
-anaconda_base_path = os.environ.get('CONDA_PREFIX')
-# anaconda_base_path = 'C:/Users/punee/.conda/envs/kaggle'
+# anaconda_base_path = os.environ.get('CONDA_PREFIX')
+anaconda_base_path = 'C:/Users/punee/.conda/envs/kaggle'
 print('Anaconda base path set to:', anaconda_base_path)
 
 PATH_env_paths += ';' + anaconda_base_path
@@ -53,6 +55,8 @@ base_data_link = 'https://bbmp.gov.in/covid-master/covid19/'
 saved_file_basename = 'Covid_Bengaluru'
 
 retry_wait_time_sec = 5
+file_check_retry_time_sec = 60 * 60
+file_download_retry_time_sec = 5 * 60
 routine_check_time_th_sec = 60 * 60
 
 def save_daily_statistics_files(soup, search_tags, hyperlink_tag, from_yyyymmdd, save_dir):
@@ -101,7 +105,9 @@ def save_daily_statistics_files(soup, search_tags, hyperlink_tag, from_yyyymmdd,
 
                 date_strs = tag4_infos[date_idx].contents[0].split('-')
                 date_yyyymmdd_str = ''.join(date_strs[::-1])
-                if date_yyyymmdd_str < from_yyyymmdd:
+                date_yyyymmdd_int = int(date_yyyymmdd_str)
+                if date_yyyymmdd_int < from_yyyymmdd:
+                    latest_downloaded_date = date_yyyymmdd_int
                     end_file_download = True
                     break
 
@@ -113,18 +119,39 @@ def save_daily_statistics_files(soup, search_tags, hyperlink_tag, from_yyyymmdd,
                 dst_filepath = os.path.join(save_dir, filename)
 
                 data_link = os.path.join(base_data_link, hl_str)
-                try:
-                    r = requests.get(data_link, allow_redirects=True)
-                    r.raise_for_status()
 
-                    open(dst_filepath, 'wb').write(r.content)
-                    print('Saved %s to %s' % (filename, save_dir))
+                retry_count = 0
+                while 1:
 
-                    date_yyyymmdd_int = int(date_yyyymmdd_str)
-                    if date_yyyymmdd_int > latest_downloaded_date:
-                        latest_downloaded_date = date_yyyymmdd_int
-                except RequestException as e:
-                    print('Error downloading file. Will try after sometime')
+                    try:
+
+                        r = requests.get(data_link, allow_redirects=True)
+                        r.raise_for_status()
+
+                        open(dst_filepath, 'wb').write(r.content)
+                        print('Saved %s to %s' % (filename, save_dir))
+
+                        if date_yyyymmdd_int > latest_downloaded_date:
+                            latest_downloaded_date = date_yyyymmdd_int
+
+                        break
+
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+
+                        if retry_count > 5:
+                            break
+                        retry_count += 1
+
+                        print('Internet Connection Error. Will try after sometime')
+                        for t_idx in tqdm(range(file_download_retry_time_sec)):
+                            time.sleep(1)
+
+                    except requests.exceptions.TooManyRedirects:
+                        break
+                    except requests.exceptions.RequestException as e:
+                        break
+                    except requests.exceptions.HTTPError as err:
+                        break
                 
 
             if end_file_download:
@@ -177,11 +204,13 @@ def url_connect(url, retry_wait_time_sec=5):
             else:
                 conn_status = False
                 print('Looks like there was an error in getting the data. Retrying...')
-                time.sleep(retry_wait_time_sec)
+                for t_idx in tqdm(range(retry_wait_time_sec)):
+                    time.sleep(1)
         except:
             conn_status = False
             print('Looks like there is connection issue. Retrying...')
-            time.sleep(retry_wait_time_sec)
+            for t_idx in tqdm(range(retry_wait_time_sec)):
+                time.sleep(1)
     
     return webUrl
 
@@ -196,17 +225,17 @@ if __name__ == "__main__":
 
     # Convert from_date tag to actual
     if from_date == 'all':
-        from_yyyymmdd = '00000000'
+        from_yyyymmdd = 0
     elif from_date == 'today':
-        from_yyyymmdd = datetime.today().strftime('%Y%m%d')
+        from_yyyymmdd = int(datetime.today().strftime('%Y%m%d'))
     elif from_date == 'pending':
         # Check the directory for the latest downloaded date
         latest_dl_date = find_latest_dl_date(save_dir)
         # And start from the next day
         nextday = latest_dl_date + datetime.timedelta(days=1)
-        from_yyyymmdd = nextday.strftime('%Y%m%d')
+        from_yyyymmdd = int(nextday.strftime('%Y%m%d'))
     else:
-        from_yyyymmdd = from_date
+        from_yyyymmdd = int(from_date)
 
     # Create directories if they do not exist
     if not os.path.exists(save_dir):
@@ -229,26 +258,36 @@ if __name__ == "__main__":
         # Download the files
         latest_dl_date = save_daily_statistics_files(soup, search_tags, hyperlink_tag, from_yyyymmdd, save_dir)
 
-        date_today = int(datetime.today().strftime('%Y%m%d'))
-        if date_today == latest_dl_date:
+        # Next Steps
+        if from_date in ['all','pending']:
+            break
+        elif from_date == 'today':
 
-            # File already downloaded, wait for the next day
-            time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            time_nextday = (datetime.today() + datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+            date_today = int(datetime.today().strftime('%Y%m%d'))
+            if date_today == latest_dl_date:
 
-            # Calculate difference:
-            start = datetime.strptime(time_now,'%Y-%m-%d %H:%M:%S')
-            ends = datetime.strptime(time_nextday, '%Y-%m-%d %H:%M:%S')
-            diff = relativedelta(ends, start)
+                # File already downloaded, wait for the next day
+                time_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                time_nextday = (datetime.today() + datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
 
-            rem_time_secs = (diff.days*24*60*60) + (diff.hours*60*60) + (diff.minutes*60) + diff.seconds
+                # Calculate difference:
+                start = datetime.strptime(time_now,'%Y-%m-%d %H:%M:%S')
+                ends = datetime.strptime(time_nextday, '%Y-%m-%d %H:%M:%S')
+                diff = relativedelta(ends, start)
 
-            # Sleeep for the remaining time
-            time.sleep(rem_time_secs)
-        else:
-            # Wait for sometime and retry
-            time.sleep(routine_check_time_th_sec)
+                rem_time_secs = (diff.days*24*60*60) + ((diff.hours+1)*60*60) + (diff.minutes*60) + diff.seconds
 
-        # In continuous run, download everyday
-        if from_date == 'today':
-            from_yyyymmdd = datetime.today().strftime('%Y%m%d')
+                # Sleeep for the remaining time
+                print('Waiting for next day\'s data...')
+                for t_idx in tqdm(range(rem_time_secs)):
+                    time.sleep(1)
+
+                # Set the new value and continue
+                from_yyyymmdd = int(datetime.today().strftime('%Y%m%d'))
+
+            else:
+
+                # Wait for sometime and retry
+                print('Waiting for file to get uploaded...')
+                for t_idx in tqdm(range(file_check_retry_time_sec)):
+                    time.sleep(1)
